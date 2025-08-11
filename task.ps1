@@ -1,5 +1,6 @@
+# Параметри
 $location = "uksouth"
-$resourceGroupName = "mate-resources"     # Змінено
+$resourceGroupName = "mate-resources"     # Задана існуюча група
 $networkSecurityGroupName = "defaultnsg"
 $virtualNetworkName = "vnet"
 $subnetName = "default"
@@ -10,14 +11,14 @@ $sshKeyPublicKey = Get-Content "~/.ssh/id_rsa.pub"
 
 $publicIpAddressNamePrefix = "linuxboxpip"
 $vmNamePrefix = "matebox"
-$vmImage = "Ubuntu2204"
+$vmImage = "UbuntuLTS"                    # Виправлений образ
 $vmSize = "Standard_B1s"
 $dnsLabelPrefix = "matetask"
 
-$vmCount = 3                          # Кількість віртуалок, які хочемо створити
-$githubUsername = "Kagerou4649"      # Змінна для GitHub username
+$vmCount = 3                              # Кількість ВМ
+$githubUsername = "Kagerou4649"           # GitHub username для скрипту
 
-# Налаштування мережі та NSG (їх можна залишити поза циклом, якщо всі ВМ будуть в одній мережі)
+# Створення мережевих ресурсів (тільки один раз)
 Write-Host "Creating network security group $networkSecurityGroupName ..."
 $nsgRuleSSH = New-AzNetworkSecurityRuleConfig -Name SSH  -Protocol Tcp -Direction Inbound -Priority 1001 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 22 -Access Allow
 $nsgRuleHTTP = New-AzNetworkSecurityRuleConfig -Name HTTP  -Protocol Tcp -Direction Inbound -Priority 1002 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 8080 -Access Allow
@@ -26,8 +27,11 @@ New-AzNetworkSecurityGroup -Name $networkSecurityGroupName -ResourceGroupName $r
 $subnet = New-AzVirtualNetworkSubnetConfig -Name $subnetName -AddressPrefix $subnetAddressPrefix
 New-AzVirtualNetwork -Name $virtualNetworkName -ResourceGroupName $resourceGroupName -Location $location -AddressPrefix $vnetAddressPrefix -Subnet $subnet
 
-# Створення SSH ключа (якщо треба, і якщо його ще нема)
+# Створення SSH ключа (якщо потрібно)
 New-AzSshKey -Name $sshKeyName -ResourceGroupName $resourceGroupName -PublicKey $sshKeyPublicKey
+
+# Масив для збереження результатів
+$results = @()
 
 for ($i=1; $i -le $vmCount; $i++) {
     $vmName = "$vmNamePrefix$i"
@@ -67,3 +71,21 @@ for ($i=1; $i -le $vmCount; $i++) {
     Write-Host "Setting VM extension CustomScript on $vmName ..."
     Set-AzVMExtension @Params
 }
+
+# Збір інформації для result.json
+for ($i=1; $i -le $vmCount; $i++) {
+    $vmName = "$vmNamePrefix$i"
+    $publicIpAddressName = "$publicIpAddressNamePrefix$i"
+
+    $publicIp = Get-AzPublicIpAddress -ResourceGroupName $resourceGroupName -Name $publicIpAddressName
+
+    $results += [PSCustomObject]@{
+        VMName = $vmName
+        PublicIpAddress = $publicIp.IpAddress
+        DnsName = $publicIp.DnsSettings.Fqdn
+    }
+}
+
+# Записуємо у result.json
+$results | ConvertTo-Json -Depth 3 | Out-File -FilePath "./result.json" -Encoding utf8
+Write-Host "Saved deployment info to result.json"
